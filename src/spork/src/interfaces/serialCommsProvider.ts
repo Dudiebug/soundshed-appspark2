@@ -1,4 +1,10 @@
 import { BluetoothDeviceInfo } from "./deviceController";
+import { SparkWriteRoute } from "../../../core/sparkDiagnostics";
+
+export interface SerialWriteOptions {
+    route?: SparkWriteRoute;
+    traceId?: string;
+}
 
 export interface SerialCommsProvider {
     disconnect(): Promise<void>;
@@ -13,9 +19,13 @@ export interface SerialCommsProvider {
 
     peekReceiveQueueEnd() : Uint8Array;
 
-    write(buffer): Promise<void>
+    write(buffer, options?: SerialWriteOptions): Promise<void>
 
     waitForAck?(cmd: number | number[], subCmd: number, timeoutMs?: number): Promise<boolean>;
 
     isSpark2Connection?(): boolean;
+
+    getTransportDiagnostics?(): any;
+
+    getGattInventory?(): Promise<any>;
 }

@@ -15,6 +15,44 @@ The app owns every lower-level step:
 5. Convert 0–10 user/AI knob values to Spark internal 0.0–1.0 values.
 6. Encode the validated Spark preset and send it to the amp.
 
+## App workflow
+
+The Amp tab supports both file import and pasted JSON:
+
+1. Import or paste a `soundshed.ai-tone.v1` config.
+2. Review validation errors/warnings.
+3. Review the seven-slot preview.
+4. Apply the imported config temporarily.
+5. The app requests a readback/refresh after apply.
+6. Tweak in the GUI.
+7. Save to the selected hardware slot only after the temporary tone is correct.
+8. Export the current tone back to AI-friendly JSON.
+
+The same panel can also download:
+
+- a Spark 2 AI tone reference JSON file for ChatGPT,
+- a ChatGPT project prompt,
+- a starter AI tone JSON template.
+
+## Generated reference and project prompt
+
+Generate project helper files from the current app catalog with:
+
+```bash
+npm run ai-tone:reference
+```
+
+This writes files under `docs/generated/`:
+
+- `spark-2-ai-tone-reference.json`
+- `spark-2-chatgpt-project-prompt.md`
+
+The reference JSON is generated from the app FX catalog. It exposes only unblocked effects by default, groups them by required Spark slot, and reports each knob on the 0–10 AI scale. The project prompt keeps ChatGPT constrained to safe JSON-only output.
+
+A checked-in prompt template is also available at [chatgpt-spark2-project-prompt.md](chatgpt-spark2-project-prompt.md).
+
+A checked-in example config is available at [examples/spark2-hss-strat-glass-drive.ai-tone.json](examples/spark2-hss-strat-glass-drive.ai-tone.json).
+
 ## Schema
 
 Supported schema: `soundshed.ai-tone.v1`
@@ -135,6 +173,8 @@ Export reverses that conversion so the file remains AI-friendly.
 ## Expansion handling
 
 The importer blocks Jimi Hendrix expansion DSP IDs by default because expansion ownership is not detected yet. In particular, `JH.*` DSP IDs are rejected unless future code explicitly detects and enables that expansion.
+
+The generated reference file omits blocked Jimi Hendrix effects by default.
 
 ## Linux/Bazzite workflow
 

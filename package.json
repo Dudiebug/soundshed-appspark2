@@ -8,6 +8,7 @@
     "build-web": "npx tsc && webpack --config ./webpack.web.config.js",
     "build-electron": "npx tsc && webpack --config ./webpack.electron.config.js",
     "build-tools": "npx tsc -p tsconfig.tools.json",
+    "doctor": "node tools/doctor.mjs",
     "test": "npm run test:ai-tone",
     "test:ai-tone": "npm run build-tools && node build-tools/tools/aiToneConfigSmokeTest.js && node build-tools/tools/aiToneReferenceSmokeTest.js",
     "ai-tone:reference": "npm run build-tools && node build-tools/tools/exportAiToneReference.js",

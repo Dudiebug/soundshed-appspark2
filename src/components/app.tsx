@@ -41,6 +41,10 @@ export const appViewModel: AppViewModel = new AppViewModel();
 export const deviceViewModel: DeviceViewModel = new DeviceViewModel();
 export const lessonManager: LessonManager = new LessonManager();
 
+// react-draggable's package types can over-require optional props with newer TS/React types.
+// Runtime usage here only needs children, so cast the component to unblock the Electron build.
+const DraggableAny = Draggable as unknown as React.ComponentType<React.PropsWithChildren<{}>>;
+
 // export context providers for view models
 export const AppViewModelContext = React.createContext(appViewModel);
 export const DeviceViewModelContext = React.createContext(deviceViewModel);
@@ -238,7 +242,7 @@ const App = () => {
         ) : null}
 
         {playingVideoUrl != null ? (
-          <Draggable>
+          <DraggableAny>
             <div className="pip-video-control">
               <div className="row">
                 <div className="col">
@@ -294,7 +298,7 @@ const App = () => {
                 />
               </div>
             </div>
-          </Draggable>
+          </DraggableAny>
         ) : (
           ""
         )}

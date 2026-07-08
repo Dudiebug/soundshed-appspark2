@@ -1,5 +1,7 @@
 import { SparkDeviceManager } from "../spork/src/devices/spark/sparkDeviceManager";
 import { SerialCommsProvider } from "../spork/src/interfaces/serialCommsProvider";
+import { FxCatalogProvider } from "../spork/src/devices/spark/sparkFxCatalog";
+import { SparkDiagnostics } from "./sparkDiagnostics";
 
 export class DeviceContext {
 
@@ -32,6 +34,18 @@ export class DeviceContext {
         }
     }
 
+    private normalizeDspId(dspId: string): string {
+        return (dspId ?? "")
+            .replace(/^pg\.spark40\./i, "")
+            .replace(/^pg\.spark2\./i, "");
+    }
+
+    private isAmpDspId(dspId: string): boolean {
+        const normalized = this.normalizeDspId(dspId);
+        const item = FxCatalogProvider.getFxCatalog().catalog.find(c => this.normalizeDspId(c.dspId) === normalized);
+        return item?.type === "amp";
+    }
+
     private async sendCommandSafe(command: string, data: any = {}): Promise<boolean> {
         try {
             await this.deviceManager.sendCommand(command, data);
@@ -48,6 +62,15 @@ export class DeviceContext {
             });
             return false;
         }
+    }
+
+    private sendDiagnosticsMessage(messageType: string, value: any) {
+        this.sendMessageToApp("device-state-changed", {
+            message: {
+                type: messageType,
+                value
+            }
+        });
     }
 
     public performAction(args: any) {
@@ -99,6 +122,8 @@ export class DeviceContext {
                 if (switched && this.deviceManager.isSpark2Device()) {
                     await this.sendCommandSafe("request_live_sync", {});
                 }
+
+                await this.sendCommandSafe("get_preset", 0x7f);
             });
         }
 
@@ -127,24 +152,72 @@ export class DeviceContext {
         }
 
         if (args.action == "setFxParam") {
-            this.sendCommandSafe("set_fx_param", args.data);
+            const command = this.isAmpDspId(args.data?.dspId) ? "set_amp_param" : "set_fx_param";
+            this.sendCommandSafe(command, args.data).then(async (sent) => {
+                if (sent) {
+                    await new Promise(resolve => setTimeout(resolve, 350));
+                    await this.sendCommandSafe("get_preset", 0x7f);
+                }
+            });
+        }
+
+        if (args.action == "setAmpParam") {
+            this.sendCommandSafe("set_amp_param", args.data).then(async (sent) => {
+                if (sent) {
+                    await new Promise(resolve => setTimeout(resolve, 350));
+                    await this.sendCommandSafe("get_preset", 0x7f);
+                }
+            });
         }
 
         if (args.action == "setFxToggle") {
-            this.sendCommandSafe("set_fx_onoff", args.data);
+            this.sendCommandSafe("set_fx_onoff", args.data).then(async (sent) => {
+                if (sent) {
+                    await new Promise(resolve => setTimeout(resolve, 350));
+                    await this.sendCommandSafe("get_preset", 0x7f);
+                }
+            });
         }
 
         if (args.action == "changeFx") {
-            this.sendCommandSafe("change_fx", args.data);
+            this.sendCommandSafe("change_fx", args.data).then(async (sent) => {
+                if (sent) {
+                    await new Promise(resolve => setTimeout(resolve, 350));
+                    await this.sendCommandSafe("get_preset", 0x7f);
+                }
+            });
         }
 
         if (args.action == "changeAmp") {
-            this.sendCommandSafe("change_amp", args.data);
+            this.sendCommandSafe("change_amp", args.data).then(async (sent) => {
+                if (sent) {
+                    await new Promise(resolve => setTimeout(resolve, 350));
+                    await this.sendCommandSafe("get_preset", 0x7f);
+                }
+            });
         }
 
         if (args.action == "storePreset") {
             // send current preset with preset and channel num we want to store to
             this.sendCommandSafe("set_preset_from_model", args.data);
+        }
+
+        if (args.action == "getSparkDiagnostics") {
+            this.sendDiagnosticsMessage("spark_diagnostics", {
+                commands: SparkDiagnostics.snapshot(),
+                device: this.deviceManager.getDiagnosticsSnapshot()
+            });
+        }
+
+        if (args.action == "runProtocolExplorer") {
+            this.deviceManager.runProtocolExplorerSnapshot().then(result => {
+                this.sendDiagnosticsMessage("protocol_explorer_snapshot", result);
+            }).catch(err => {
+                this.sendDiagnosticsMessage("protocol_explorer_snapshot", {
+                    error: (err as Error).message ?? String(err),
+                    commands: SparkDiagnostics.snapshot()
+                });
+            });
         }
     }
 }

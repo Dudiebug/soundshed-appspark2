@@ -1,5 +1,7 @@
 import React from "react";
 
+import { clampUnitValue, parseParamIndex } from "../../core/sparkDiagnostics";
+
 declare global {
   namespace JSX {
     interface IntrinsicElements {
@@ -13,17 +15,24 @@ const FxParam = ({ type = "knob", p, fx, onFxParamChange }) => {
   let customElement;
 
   const setParamValue = (e) => {
-    /*console.log(
-      `setParamValue: Changed param ${e.target.value} ${JSON.stringify(
-        e.target.tag
-      )} ${fx.name} ${fx.type}`
-    );*/
+    let value = e.target.value;
+    let index = e.target.tag.paramId;
+
+    try {
+      if (type === "knob") {
+        value = clampUnitValue(value);
+      }
+      index = parseParamIndex(index);
+    } catch (err) {
+      console.warn("Ignoring invalid FX parameter change", err);
+      return;
+    }
 
     onFxParamChange({
       dspId: fx.type,
-      index: e.target.tag.paramId,
-      value: e.target.value,
-      type: type,
+      index,
+      value,
+      type,
     });
   };
 
@@ -42,9 +51,6 @@ const FxParam = ({ type = "knob", p, fx, onFxParamChange }) => {
     }
     if (customElement.value != newVal && newVal != null) {
       // an external input has changed a control value
-      /* console.log(
-        "Control Strip UI updated. " + customElement.value + " :: " + newVal
-      );*/
       customElement?.setValue(newVal);
     }
   }, [fx, p]);

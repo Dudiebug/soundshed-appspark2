@@ -19,6 +19,14 @@ module.exports = {
 		// Add `.ts` and `.tsx` as a resolvable extension.
 		extensions: [".ts", ".tsx", ".js", ".jsx"]
 	},
+	optimization: {
+		// Work around webpack self-reference export analysis failures seen with
+		// react-transition-group when bundling the Electron renderer on newer
+		// webpack releases. This keeps the renderer build conservative and stable.
+		providedExports: false,
+		usedExports: false,
+		innerGraph: false
+	},
 	module: {
 		rules: [
 			// all files with a `.ts`, `.tsx`, `.js`, or `.jsx` extension will be handled by `ts-loader`

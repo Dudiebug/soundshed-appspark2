@@ -18,6 +18,32 @@ Windows, macOS and Linux. 64-bit OS and Bluetooth (BLE) connectivity required.
 ### Known Issues
 - Invalid settings may crash amp, requiring amp to be switched off and on again.
 
+## Spark 2 AI Tone Config Workflow
+
+The Amp tab now includes an AI tone JSON import/export workflow for Spark 2 development. ChatGPT should generate declarative config files only; it must not generate raw Bluetooth bytes, Spark command frames, base64 protocol payloads, or SysEx chunks.
+
+Use [AI-Instruction-Prompt.md](AI-Instruction-Prompt.md) as the root ChatGPT Project instruction prompt. It contains the strict JSON-only rules, Spark 2/Bazzite/HSS Strat assumptions, expansion policy, slot order, knob scale, and safety boundary.
+
+Safe workflow:
+
+1. Describe a tone to ChatGPT.
+2. ChatGPT emits a `soundshed.ai-tone.v1` JSON file with every knob on a 0–10 scale.
+3. Import the JSON file in the Amp tab.
+4. The app validates the schema, the fixed seven-slot signal chain, DSP IDs, required knobs, model support, and expansion requirements.
+5. The app converts valid 0–10 knob values to Spark internal 0.0–1.0 values.
+6. The app applies the preset temporarily first.
+7. Tweak in the GUI.
+8. Save to a Spark hardware slot only after the tone is loaded and verified.
+9. Export the current tone back to AI-friendly JSON when needed.
+
+See [docs/ai-tone-config.md](docs/ai-tone-config.md) for the schema and Linux/Bazzite test flow.
+
+## Bazzite / Linux Notes
+
+Use the Electron desktop build for Bazzite Linux testing. Make sure the amp is not connected to the Positive Grid mobile app or another device before scanning. If BLE/GATT discovery stalls, power-cycle the Spark 2, restart Bluetooth from the desktop/system UI, and reconnect from the Amp tab.
+
+Spark 2 has 8 hardware preset slots. Spark 40, Spark Mini, Spark GO, and Spark NEO remain 4-slot devices. The implementation keeps model slot counts separate so Spark 2 changes do not silently change Spark 40/Mini/GO behavior.
+
 ## Roadmap
 
 Possible future features include:
@@ -91,6 +117,10 @@ The final installable app is packaged using electron-forge:
 - Run `npm run sim:spark:test` to start a temporary TCP simulator and exercise spork comms encode/decode flows without launching the app UI.
 - Use `npm run sim:spark:test:quick -- --port 9124` for faster reruns after app TS is already built.
 
+### AI Tone Config Smoke Test
+- Run `npm test` to compile tools and run the AI tone config validation smoke test.
+- The smoke test checks stock Spark 2 config import/export, 0–10 knob conversion, unknown DSP rejection, out-of-range knob rejection, and default Jimi Hendrix expansion blocking.
+
 ## Release Process 
 - Electron
     - ensure electron config selected
@@ -121,4 +151,3 @@ See our [Spark Amp Protocol document](docs/spark-amp-protocol.md) for current un
 At the bluetooth level the app registers a listener to consume data changes for a hardware characteristic, this delivers a stream of bytes in chunks. The app continuously queues the data recieved and looks for message terminator bytes (F7). When encountered it queues the current data for message processing higher up the chain.
 
 The app then continuously runs a message processing loop to peek for terminated data chunks from the bluetooth reader, these are picked up from the bluetooth reader queue and parsed/interpreted into messages for our app, then added to our app message queue for later processing.
-

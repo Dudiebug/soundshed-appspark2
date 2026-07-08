@@ -1,0 +1,90 @@
+{
+  "schema": "soundshed.ai-tone.v1",
+  "targetDevice": "spark-2",
+  "metadata": {
+    "name": "HSS Strat Glass Drive",
+    "description": "Bright edge-of-breakup tone for an HSS Strat. Uses only stock Spark 2-safe effects and 0-10 knob values.",
+    "bpm": 120,
+    "guitar": "HSS Strat"
+  },
+  "requirements": {
+    "expansions": []
+  },
+  "slots": [
+    {
+      "slot": "gate",
+      "dspId": "bias.noisegate",
+      "enabled": true,
+      "knobs": {
+        "Threshold": 2.0,
+        "Decay": 1.0
+      }
+    },
+    {
+      "slot": "comp",
+      "dspId": "LA2AComp",
+      "enabled": false,
+      "knobs": {
+        "Gain": 7.0,
+        "Peak Reduction": 5.0,
+        "Limit/Compress": 0.0
+      }
+    },
+    {
+      "slot": "drive",
+      "dspId": "DistortionTS9",
+      "enabled": true,
+      "knobs": {
+        "Overdrive": 3.5,
+        "Tone": 5.5,
+        "Level": 6.0
+      }
+    },
+    {
+      "slot": "amp",
+      "dspId": "RolandJC120",
+      "enabled": true,
+      "knobs": {
+        "Gain": 4.0,
+        "Bass": 4.5,
+        "Middle": 5.0,
+        "Treble": 6.5,
+        "Master": 6.0
+      }
+    },
+    {
+      "slot": "modulation",
+      "dspId": "Tremolo",
+      "enabled": false,
+      "knobs": {
+        "Speed": 5.0,
+        "Depth": 3.0,
+        "Level": 5.0
+      }
+    },
+    {
+      "slot": "delay",
+      "dspId": "VintageDelay",
+      "enabled": true,
+      "knobs": {
+        "Repeat Rate": 3.0,
+        "Intensity": 4.0,
+        "Echo": 3.5,
+        "BPM": 10.0
+      }
+    },
+    {
+      "slot": "reverb",
+      "dspId": "bias.reverb.3",
+      "enabled": true,
+      "knobs": {
+        "Level": 3.0,
+        "Damping": 5.0,
+        "Low Cut": 4.0,
+        "High Cut": 6.0,
+        "Dwell": 4.0,
+        "Time": 5.0
+      }
+    }
+  ]
+}

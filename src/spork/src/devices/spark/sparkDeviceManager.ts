@@ -6,6 +6,7 @@ import { SparkMessageReader } from "./sparkMessageReader";
 import { FxMappingSparkToTone } from "../../../../core/fxMapping";
 import { SerialCommsProvider } from "../../interfaces/serialCommsProvider";
 import { Utils } from "../../../../core/utils";
+import { assertSparkPresetIsSafe } from "./sparkPresetValidator";
 
 export class SparkDeviceManager implements DeviceController {
 
@@ -13,6 +14,7 @@ export class SparkDeviceManager implements DeviceController {
 
     public deviceAddress = "";
     private isSpark2 = false;
+    private receiverInterval: ReturnType<typeof setInterval> = null;
 
     private reader = new SparkMessageReader();
 
@@ -40,7 +42,7 @@ export class SparkDeviceManager implements DeviceController {
             await this.startReceiver();
 
         } else {
-            this.log('Device not yet connected! Cannot listen for data');
+            this.log("Device not yet connected! Cannot listen for data");
         }
 
         return connected;
@@ -48,6 +50,21 @@ export class SparkDeviceManager implements DeviceController {
 
     public isSpark2Device(): boolean {
         return this.isSpark2;
+    }
+
+    private getValidationModelId(): string {
+        return this.isSpark2 ? "spark-2" : "spark-40";
+    }
+
+    private validatePresetBeforeSending(preset: Preset) {
+        assertSparkPresetIsSafe(preset, { modelId: this.getValidationModelId() });
+    }
+
+    private assertDspMutationSafe(dspId: string) {
+        const normalized = (dspId ?? "").replace(/^pg\.spark40\./i, "").replace(/^pg\.spark2\./i, "");
+        if (normalized.startsWith("JH.")) {
+            throw new Error(`DSP '${normalized}' requires the Jimi Hendrix expansion and is blocked by default.`);
+        }
     }
 
     public async startReceiver() {
@@ -60,11 +77,10 @@ export class SparkDeviceManager implements DeviceController {
 
         let msgLoop = async () => {
 
-
             let queueContent = this.connection.readReceiveQueue();
 
             if (queueContent != null && queueContent.length > 0) {
-                this.log('Received last message in batch, processing messages ' + queueContent.length);
+                this.log("Received last message in batch, processing messages " + queueContent.length);
                 for (var c of queueContent) {
                     this.log(`MSG:${c[2]} IDX: ${c[8]} of ${c[7]} \t${this.buf2hex(c)}`);
                 }
@@ -75,18 +91,26 @@ export class SparkDeviceManager implements DeviceController {
         // initial run
         msgLoop();
 
+        if (this.receiverInterval != null) {
+            clearInterval(this.receiverInterval);
+        }
+
         // call msg loop every 50 ms
-        setInterval(msgLoop, 50);
+        this.receiverInterval = setInterval(msgLoop, 50);
     }
 
     public async disconnect() {
         try {
+            if (this.receiverInterval != null) {
+                clearInterval(this.receiverInterval);
+                this.receiverInterval = null;
+            }
             await this.connection.disconnect();
         } catch { }
     }
 
     private buf2hex(buffer: Uint8Array | ArrayBuffer) {
-        return Array.prototype.map.call(new Uint8Array(buffer), x => ('00' + x.toString(16)).slice(-2)).join('');
+        return Array.prototype.map.call(new Uint8Array(buffer), x => ("00" + x.toString(16)).slice(-2)).join("");
     }
 
     public async readStateMessage(dataArray: Array<Uint8Array>): Promise<DeviceMessage[]> {
@@ -103,7 +127,7 @@ export class SparkDeviceManager implements DeviceController {
 
             this.log(m);
 
-            if (m.type == 'preset') {
+            if (m.type == "preset") {
                 reader.deviceState.presetConfig = <Preset>m.value;
                 this.hydrateDeviceStateInfo(reader.deviceState);
             }
@@ -112,7 +136,7 @@ export class SparkDeviceManager implements DeviceController {
                 reader.deviceState.message = m;
                 this.onStateChanged(reader.deviceState);
             } else {
-                this.log("No onStateChange handler defined.")
+                this.log("No onStateChange handler defined.");
             }
         }
 
@@ -130,7 +154,7 @@ export class SparkDeviceManager implements DeviceController {
 
                 let dspId = fx.dspId;
 
-                if (dspId.indexOf("bias.reverb") > -1) {
+                if (dspId.indexOf("bias.reverb") > -1 && fx.params?.[6]) {
                     //map mode variant to our config dspId
                     dspId = FxMappingSparkToTone.getReverbDspId(fx.params[6].value);
                 } else {
@@ -175,6 +199,7 @@ export class SparkDeviceManager implements DeviceController {
 
         if (type == "set_preset") {
             this.log("Setting preset " + JSON.stringify(data));
+            this.validatePresetBeforeSending(data);
             msgArray = msg.create_preset(data);
         }
 
@@ -183,10 +208,12 @@ export class SparkDeviceManager implements DeviceController {
 
             if (Array.isArray(data)){
                 this.log("Got preset and target channel number");
-                // if data is array with preset and channel number  use that
+                // if data is array with preset and target channel number use that
+                this.validatePresetBeforeSending(data[0]);
                 msgArray = msg.create_preset_from_model(data[0], data[1]);
-            }else {
+            } else {
                 // set preset to soft channel (not stored to hardware)
+                this.validatePresetBeforeSending(data);
                 msgArray = msg.create_preset_from_model(data);
             }
 
@@ -204,26 +231,33 @@ export class SparkDeviceManager implements DeviceController {
 
         if (type == "change_amp") {
             this.log("Changing Amp " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspIdOld);
+            this.assertDspMutationSafe(data.dspIdNew);
             msgArray = msg.change_amp(data.dspIdOld, data.dspIdNew);
         }
 
         if (type == "set_amp_param") {
             this.log("Changing Amp Param " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspId);
             msgArray = msg.change_amp_parameter(data.dspId, data.index, data.value);
         }
 
         if (type == "change_fx") {
             this.log("Changing Effect " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspIdOld);
+            this.assertDspMutationSafe(data.dspIdNew);
             msgArray = msg.change_effect(data.dspIdOld, data.dspIdNew);
         }
 
         if (type == "set_fx_onoff") {
             this.log("Toggling Effect " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspId);
             msgArray = msg.turn_effect_onoff(data.dspId, data.value == 1 ? "On" : "Off");
         }
 
         if (type == "set_fx_param") {
             this.log("Changing Effect Param " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspId);
             msgArray = msg.change_effect_parameter(data.dspId, data.index, data.value);
         }
 
@@ -268,7 +302,6 @@ export class SparkDeviceManager implements DeviceController {
                     await this.connection.write(dat);
                 }
 
-
             } catch (err) {
                 console.warn("Caught err writing msg array");
                 await Utils.sleepAsync(100);
@@ -294,7 +327,9 @@ export class SparkDeviceManager implements DeviceController {
                 const expectedCmd = idx === msgArray.length - 1 ? 0x04 : 0x05;
                 const ackOk = await this.connection.waitForAck([expectedCmd], 0x01, 3000);
                 if (!ackOk) {
-                    this.log(`Timed out waiting for Spark 2 upload ack cmd=${expectedCmd.toString(16)} sub=01`);
+                    const msg = `Timed out waiting for Spark 2 upload ack cmd=${expectedCmd.toString(16)} sub=01`;
+                    this.log(msg);
+                    throw new Error(msg);
                 }
             }
         }

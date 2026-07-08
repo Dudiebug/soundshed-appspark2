@@ -1,7 +1,17 @@
-import { SerialCommsProvider } from "../../interfaces/serialCommsProvider";
+import { SerialCommsProvider, SerialWriteOptions } from "../../interfaces/serialCommsProvider";
 import { BluetoothDeviceInfo } from "../../interfaces/deviceController";
 import { Utils } from "../../../../core/utils";
 import { SparkMessageReader } from "./sparkMessageReader";
+import { SparkDiagnostics, SparkWriteRoute } from "../../../../core/sparkDiagnostics";
+
+interface BleProfileState {
+    serviceUuid: string;
+    commandCharacteristicUuid: string;
+    changeCharacteristicUuid: string;
+    commandCharacteristic?: BluetoothRemoteGATTCharacteristic;
+    changeCharacteristic?: BluetoothRemoteGATTCharacteristic;
+    connected: boolean;
+}
 
 export class BleProvider implements SerialCommsProvider {
 
@@ -14,8 +24,22 @@ export class BleProvider implements SerialCommsProvider {
 
     private spark40CommandCharacteristicUUID = '0xffc1'; // device command messages
     private spark40ChangesCharacteristicUUID = '0xffc2'; // device change messages
-    private spark2CommandCharacteristicUUID = '0xffc9'; // Spark 2 command messages
-    private spark2ChangesCharacteristicUUID = '0xffca'; // Spark 2 change messages
+    private spark2CommandCharacteristicUUID = '0xffc9'; // Spark 2 auxiliary command messages
+    private spark2ChangesCharacteristicUUID = '0xffca'; // Spark 2 auxiliary change messages
+
+    private controlProfile: BleProfileState = {
+        serviceUuid: this.serviceSpark40UUID,
+        commandCharacteristicUuid: this.spark40CommandCharacteristicUUID,
+        changeCharacteristicUuid: this.spark40ChangesCharacteristicUUID,
+        connected: false
+    };
+
+    private auxiliaryProfile: BleProfileState = {
+        serviceUuid: this.serviceSpark2UUID,
+        commandCharacteristicUuid: this.spark2CommandCharacteristicUUID,
+        changeCharacteristicUuid: this.spark2ChangesCharacteristicUUID,
+        connected: false
+    };
 
     private isSpark2ConnectionActive = false;
 
@@ -28,14 +52,11 @@ export class BleProvider implements SerialCommsProvider {
 
     private recentAcks: { cmd: number; subCmd: number; at: number }[] = [];
 
-    private commandCharacteristic: BluetoothRemoteGATTCharacteristic;
-    private changeCharacteristic: BluetoothRemoteGATTCharacteristic;
-
     private isConnected: boolean;
     private isReceiving: boolean;
 
     private receiveQueue: Array<Uint8Array>;
-    private sendQueue: Array<Uint8Array>;
+    private sendQueue: { msg: Uint8Array; options?: SerialWriteOptions }[];
 
     private lastTimeStamp = null;
     private lastDataChunkRemainder: Uint8Array = new Uint8Array();
@@ -92,20 +113,29 @@ export class BleProvider implements SerialCommsProvider {
             this.log("Getting Device Service..");
 
             const expectsSpark2 = (device?.name || "").toLowerCase().includes("spark 2");
+            this.isSpark2ConnectionActive = expectsSpark2;
 
-            let connected = false;
             if (expectsSpark2) {
-                connected = await this.tryConnectService(this.serviceSpark2UUID, this.spark2CommandCharacteristicUUID, this.spark2ChangesCharacteristicUUID, true);
-                if (!connected) {
-                    connected = await this.tryConnectService(this.serviceSpark40UUID, this.spark40CommandCharacteristicUUID, this.spark40ChangesCharacteristicUUID, false);
+                // Spark 2 tone upload/control commands should still use the classic FFC0 profile.
+                const controlConnected = await this.tryConnectProfile(this.controlProfile, true, "control");
+                const auxiliaryConnected = await this.tryConnectProfile(this.auxiliaryProfile, true, "auxiliary");
+
+                if (!controlConnected && auxiliaryConnected) {
+                    // Fallback for unknown firmware behavior: keep the connection usable, but diagnostics will show that control fell back to FFC8.
+                    this.log("Spark 2 primary FFC0 control profile was not available. Falling back to auxiliary profile for control writes.");
+                    this.controlProfile = { ...this.auxiliaryProfile };
+                    this.controlProfile.connected = true;
                 }
-            } else {
-                connected = await this.tryConnectService(this.serviceSpark40UUID, this.spark40CommandCharacteristicUUID, this.spark40ChangesCharacteristicUUID, false);
-                if (!connected) {
-                    connected = await this.tryConnectService(this.serviceSpark2UUID, this.spark2CommandCharacteristicUUID, this.spark2ChangesCharacteristicUUID, true);
+
+                if (!this.controlProfile.connected) {
+                    this.log("Failed to initialize Spark 2 BLE control profile");
+                    return false;
                 }
+
+                return true;
             }
 
+            const connected = await this.tryConnectProfile(this.controlProfile, false, "control");
             if (!connected) {
                 this.log("Failed to initialize Spark BLE services and characteristics");
                 return false;
@@ -118,21 +148,23 @@ export class BleProvider implements SerialCommsProvider {
         }
     }
 
-    private async tryConnectService(serviceUUID: string, commandCharUUID: string, changeCharUUID: string, isSpark2: boolean): Promise<boolean> {
+    private async tryConnectProfile(profile: BleProfileState, isSpark2: boolean, label: SparkWriteRoute): Promise<boolean> {
         try {
-            const service = await this.server.getPrimaryService(serviceUUID);
+            const service = await this.server.getPrimaryService(profile.serviceUuid);
 
-            this.log("Getting Device Characteristics..");
+            this.log(`Getting ${label} BLE characteristics for ${profile.serviceUuid}..`);
 
-            this.commandCharacteristic = await service.getCharacteristic(parseInt(commandCharUUID));
-            this.changeCharacteristic = await service.getCharacteristic(parseInt(changeCharUUID));
+            profile.commandCharacteristic = await service.getCharacteristic(parseInt(profile.commandCharacteristicUuid));
+            profile.changeCharacteristic = await service.getCharacteristic(parseInt(profile.changeCharacteristicUuid));
+            profile.connected = true;
             this.isSpark2ConnectionActive = isSpark2;
 
-            this.log(`Using ${isSpark2 ? "Spark 2" : "Spark 40"} BLE profile`);
+            this.log(`Using ${isSpark2 ? "Spark 2" : "Spark 40"} ${label} BLE profile ${profile.serviceUuid}`);
 
             return true;
         } catch (err) {
-            this.log(`Service discovery failed for ${serviceUUID}: ${JSON.stringify(err)}`);
+            profile.connected = false;
+            this.log(`Service discovery failed for ${profile.serviceUuid}: ${JSON.stringify(err)}`);
             return false;
         }
     }
@@ -182,12 +214,14 @@ export class BleProvider implements SerialCommsProvider {
 
     public async disconnect() {
 
-        if (this.selectedDevice.gatt.connected) {
+        if (this.selectedDevice?.gatt?.connected) {
             this.selectedDevice.gatt.disconnect();
         }
 
         this.isConnected = false;
         this.isSpark2ConnectionActive = false;
+        this.controlProfile.connected = false;
+        this.auxiliaryProfile.connected = false;
 
         for (const waiter of this.pendingAckWaiters) {
             clearTimeout(waiter.timeoutHandle);
@@ -220,7 +254,6 @@ export class BleProvider implements SerialCommsProvider {
             let currentTerminatorItemIdx = 0;
 
             for (let i of terminatorIndexes) {
-
 
                 if (this.getTimeDeltaSinceLastMsg() > 100 && this.lastDataChunkRemainder.length > 0) {
                     this.log("Warning: outdated chunk remainder consumed");
@@ -312,25 +345,23 @@ export class BleProvider implements SerialCommsProvider {
         return data;
     }
 
-    /*
-     start receiving data for our target characteristic, storing in the receive queue
-    */
-    public async beginQueuedReceive(): Promise<boolean> {
+    private async subscribeCharacteristic(characteristic: BluetoothRemoteGATTCharacteristic, label: SparkWriteRoute): Promise<boolean> {
         try {
-            await this.changeCharacteristic.startNotifications();
+            await characteristic.startNotifications();
 
-            this.log('> Notifications started');
+            this.log(`> Notifications started for ${label}`);
             this.isReceiving = true;
 
-            this.changeCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+            characteristic.addEventListener('characteristicvaluechanged', (event) => {
                 const dataView: DataView = (<any>event.target).value;
-                let dataChunk = new Uint8Array(dataView.buffer);
+                let dataChunk = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
 
                 if (event.timeStamp < this.lastTimeStamp) {
                     this.log(`[ERROR]: timestamp out of order`);
                 }
+                this.lastTimeStamp = event.timeStamp;
 
-                this.log(`[RECV RAW BLE]: ${event.timeStamp} ${this.buf2hex(dataChunk)}`);
+                this.log(`[RECV RAW BLE ${label}]: ${event.timeStamp} ${this.buf2hex(dataChunk)}`);
 
                 this.handleAndQueueMessageData(dataChunk);
 
@@ -338,22 +369,31 @@ export class BleProvider implements SerialCommsProvider {
 
             return true;
         } catch (err) {
-            this.log('> Failed to begin listening for hardware data changes');
-            this.isReceiving = false;
+            this.log(`> Failed to begin listening for ${label} hardware data changes`);
             return false;
         }
+    }
 
+    /*
+     start receiving data for our target characteristic, storing in the receive queue
+    */
+    public async beginQueuedReceive(): Promise<boolean> {
+        let started = false;
+
+        if (this.controlProfile.changeCharacteristic) {
+            started = await this.subscribeCharacteristic(this.controlProfile.changeCharacteristic, "control") || started;
+        }
+
+        if (this.auxiliaryProfile.changeCharacteristic && this.auxiliaryProfile.changeCharacteristic !== this.controlProfile.changeCharacteristic) {
+            started = await this.subscribeCharacteristic(this.auxiliaryProfile.changeCharacteristic, "auxiliary") || started;
+        }
+
+        this.isReceiving = started;
+        return started;
     }
 
     public isNotificationActive(): boolean {
         return this.isReceiving;
-    }
-
-    private isSingleChunkMessage(chunk: Uint8Array): boolean {
-        return ((chunk[4] == 4) || (chunk[4] == 3 && chunk[7] == 0));
-        // command type 4 is an ACK, which is only one chunk
-        // some command type 3 commands are only one chunk
-        // all other types of messages are multi-chunk
     }
 
     public readReceiveQueue(): Array<Uint8Array> {
@@ -372,7 +412,7 @@ export class BleProvider implements SerialCommsProvider {
         // only return our queue if the last item ends in an f7 terminator
         if (lastItem[lastItem.length - 1] == 0xf7) {
             const received = [...this.receiveQueue];
-            this.receiveQueue = new Array<Uint8Array>;
+            this.receiveQueue = new Array<Uint8Array>();
             return received;
         } else {
             return null;
@@ -383,7 +423,7 @@ export class BleProvider implements SerialCommsProvider {
 
         // only return our queue end if the last item ends in an f7 terminator
         let lastItem = this.receiveQueue[this.receiveQueue.length - 1];
-        if (lastItem[lastItem.length - 1] == 0xf7) {
+        if (lastItem && lastItem[lastItem.length - 1] == 0xf7) {
             return lastItem;
         } else {
             return null;
@@ -405,12 +445,28 @@ export class BleProvider implements SerialCommsProvider {
         return parts;
     }
 
-    private async writeChunkWithRetry(chunk: Uint8Array): Promise<void> {
+    private getProfileForRoute(route: SparkWriteRoute): BleProfileState {
+        if (route === "auxiliary" && this.auxiliaryProfile.commandCharacteristic) {
+            return this.auxiliaryProfile;
+        }
+
+        return this.controlProfile;
+    }
+
+    private async writeChunkWithRetry(chunk: Uint8Array, profile: BleProfileState, route: SparkWriteRoute, traceId?: string): Promise<void> {
         let attempts = 5;
         while (attempts > 0) {
             try {
                 attempts--;
-                await this.commandCharacteristic.writeValueWithoutResponse(chunk as unknown as BufferSource);
+                SparkDiagnostics.update(traceId, {
+                    route,
+                    transportProfile: this.isSpark2ConnectionActive ? "spark-2-ble" : "spark-ble",
+                    serviceUuid: profile.serviceUuid,
+                    writeCharacteristicUuid: profile.commandCharacteristicUuid,
+                    notifyCharacteristicUuid: profile.changeCharacteristicUuid,
+                    bytesLength: chunk.length
+                });
+                await profile.commandCharacteristic.writeValueWithoutResponse(chunk as unknown as BufferSource);
                 return;
             } catch (err) {
                 if (attempts > 0) {
@@ -424,10 +480,16 @@ export class BleProvider implements SerialCommsProvider {
         }
     }
 
-    public async write(msg: any) {
+    public async write(msg: any, options: SerialWriteOptions = {}) {
+
+        const route = options.route ?? "control";
+        const profile = this.getProfileForRoute(route);
+        if (!profile?.commandCharacteristic) {
+            throw new Error(`No BLE ${route} command characteristic available.`);
+        }
 
         // add this message to start of queue, queue will be processed end-first
-        this.sendQueue.unshift(msg);
+        this.sendQueue.unshift({ msg, options });
 
         if (!this.isSendQueueProcessing) {
             while (this.sendQueue.length > 0) {
@@ -447,15 +509,17 @@ export class BleProvider implements SerialCommsProvider {
 
                 this.lastMsgSentTime = new Date();
 
-                let currentMsg = this.sendQueue.pop();
+                let current = this.sendQueue.pop();
+                const currentRoute = current.options?.route ?? "control";
+                const currentProfile = this.getProfileForRoute(currentRoute);
 
-                const uint8Array = new Uint8Array(currentMsg);
+                const uint8Array = new Uint8Array(current.msg);
 
-                this.log(`Writing command changes.. ${uint8Array.length} bytes`);
+                this.log(`Writing command changes.. ${uint8Array.length} bytes route=${currentRoute} service=${currentProfile.serviceUuid}`);
 
                 const chunks = this.isSpark2ConnectionActive ? this.splitAttWrites(uint8Array, 100) : [uint8Array];
                 for (let i = 0; i < chunks.length; i++) {
-                    await this.writeChunkWithRetry(chunks[i]);
+                    await this.writeChunkWithRetry(chunks[i], currentProfile, currentRoute, current.options?.traceId);
                     if (chunks.length > 1 && i < chunks.length - 1) {
                         await Utils.sleepAsync(5);
                     }
@@ -464,5 +528,59 @@ export class BleProvider implements SerialCommsProvider {
 
             this.isSendQueueProcessing = false;
         }
+    }
+
+    public getTransportDiagnostics() {
+        return {
+            isConnected: this.isConnected,
+            isReceiving: this.isReceiving,
+            isSpark2ConnectionActive: this.isSpark2ConnectionActive,
+            control: {
+                serviceUuid: this.controlProfile.serviceUuid,
+                commandCharacteristicUuid: this.controlProfile.commandCharacteristicUuid,
+                changeCharacteristicUuid: this.controlProfile.changeCharacteristicUuid,
+                connected: this.controlProfile.connected
+            },
+            auxiliary: {
+                serviceUuid: this.auxiliaryProfile.serviceUuid,
+                commandCharacteristicUuid: this.auxiliaryProfile.commandCharacteristicUuid,
+                changeCharacteristicUuid: this.auxiliaryProfile.changeCharacteristicUuid,
+                connected: this.auxiliaryProfile.connected
+            }
+        };
+    }
+
+    public async getGattInventory(): Promise<any> {
+        if (!this.server?.connected) {
+            return { connected: false, services: [] };
+        }
+
+        if (typeof (this.server as any).getPrimaryServices !== "function") {
+            return { connected: true, services: [], note: "getPrimaryServices is not available in this Web Bluetooth runtime." };
+        }
+
+        const services = await (this.server as any).getPrimaryServices();
+        const result = [];
+        for (const service of services) {
+            const characteristics = typeof service.getCharacteristics === "function"
+                ? await service.getCharacteristics()
+                : [];
+            result.push({
+                uuid: service.uuid,
+                characteristics: characteristics.map(ch => ({
+                    uuid: ch.uuid,
+                    properties: {
+                        broadcast: !!ch.properties?.broadcast,
+                        read: !!ch.properties?.read,
+                        writeWithoutResponse: !!ch.properties?.writeWithoutResponse,
+                        write: !!ch.properties?.write,
+                        notify: !!ch.properties?.notify,
+                        indicate: !!ch.properties?.indicate
+                    }
+                }))
+            });
+        }
+
+        return { connected: true, services: result };
     }
 }

@@ -8,6 +8,8 @@
     "build-web": "npx tsc && webpack --config ./webpack.web.config.js",
     "build-electron": "npx tsc && webpack --config ./webpack.electron.config.js",
     "build-tools": "npx tsc -p tsconfig.tools.json",
+    "test": "npm run test:ai-tone",
+    "test:ai-tone": "npm run build-tools && node build-tools/tools/aiToneConfigSmokeTest.js",
     "sim:spark": "node build-tools/tools/spark-amp-simulator/src/cli.js",
     "sim:spark:build": "npm run build-tools && npm run sim:spark",
     "sim:spark:help": "npm run sim:spark -- help",
@@ -18,7 +20,6 @@
     "watch-web": "concurrently \"tsc -w\" \"webpack -w --config ./webpack.web.config.js\"",
     "watch-electron": "concurrently \"tsc -w\" \"webpack -w --config ./webpack.electron.config.js\"",
     "start-electron": "npx tsc && webpack --config ./webpack.electron.config.js && electron-forge start --inspect-electron",
-    "test": "echo \"Error: no test specified\" && exit 1",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },

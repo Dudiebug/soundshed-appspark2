@@ -1,11 +1,10 @@
 import React, { useEffect } from "react";
-import { Utils } from "../../core/utils";
 import { DeviceStateStore } from "../../stores/devicestate";
 import {
   appViewModel,
-  AppViewModelContext,
   deviceViewModel as vm,
 } from "../app";
+import AiToneImportExport from "./ai-tone-import-export";
 import DeviceControls from "./device-controls";
 import MiscControls from "./misc-controls";
 import SignalPathControl from "./signal-path";
@@ -55,7 +54,7 @@ const DeviceMainControl = () => {
     if (targetDeviceInfo != null) {
       console.info("Connecting device..");
       deviceViewModel.connectDevice(targetDeviceInfo).then((connectedOk) => {
-        console.warn("Completed initial connection to device..");
+        console.warn("Completed initial connection to device..", connectedOk);
       });
     } else {
       console.warn("Target device not found..");
@@ -82,7 +81,7 @@ const DeviceMainControl = () => {
   };
 
   const requestStoreHardwarePreset = () => {
-    deviceViewModel.storeCurrentPreset(selectedChannel);  
+    deviceViewModel.storeCurrentPreset(selectedChannel);
   };
 
   const fxParamChange = (args) => {
@@ -143,6 +142,7 @@ const DeviceMainControl = () => {
           selectedChannel={selectedChannel}
           onSetPreset={requestStoreHardwarePreset}
         />
+        <AiToneImportExport currentPreset={currentPreset} />
         <SignalPathControl
           signalPathState={currentPreset}
           onFxParamChange={fxParamChange}

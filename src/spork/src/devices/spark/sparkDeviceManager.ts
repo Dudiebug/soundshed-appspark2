@@ -60,6 +60,13 @@ export class SparkDeviceManager implements DeviceController {
         assertSparkPresetIsSafe(preset, { modelId: this.getValidationModelId() });
     }
 
+    private assertDspMutationSafe(dspId: string) {
+        const normalized = (dspId ?? "").replace(/^pg\.spark40\./i, "").replace(/^pg\.spark2\./i, "");
+        if (normalized.startsWith("JH.")) {
+            throw new Error(`DSP '${normalized}' requires the Jimi Hendrix expansion and is blocked by default.`);
+        }
+    }
+
     public async startReceiver() {
 
         // continuously peek message queue for message terminator, then consume queue
@@ -224,26 +231,33 @@ export class SparkDeviceManager implements DeviceController {
 
         if (type == "change_amp") {
             this.log("Changing Amp " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspIdOld);
+            this.assertDspMutationSafe(data.dspIdNew);
             msgArray = msg.change_amp(data.dspIdOld, data.dspIdNew);
         }
 
         if (type == "set_amp_param") {
             this.log("Changing Amp Param " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspId);
             msgArray = msg.change_amp_parameter(data.dspId, data.index, data.value);
         }
 
         if (type == "change_fx") {
             this.log("Changing Effect " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspIdOld);
+            this.assertDspMutationSafe(data.dspIdNew);
             msgArray = msg.change_effect(data.dspIdOld, data.dspIdNew);
         }
 
         if (type == "set_fx_onoff") {
             this.log("Toggling Effect " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspId);
             msgArray = msg.turn_effect_onoff(data.dspId, data.value == 1 ? "On" : "Off");
         }
 
         if (type == "set_fx_param") {
             this.log("Changing Effect Param " + JSON.stringify(data));
+            this.assertDspMutationSafe(data.dspId);
             msgArray = msg.change_effect_parameter(data.dspId, data.index, data.value);
         }
 

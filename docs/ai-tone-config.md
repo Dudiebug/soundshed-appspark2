@@ -34,6 +34,10 @@ The same panel can also download:
 - a ChatGPT project prompt,
 - a starter AI tone JSON template.
 
+## Root AI instruction prompt
+
+Use the repository-root [AI-Instruction-Prompt.md](../AI-Instruction-Prompt.md) as the main ChatGPT Project instruction prompt. It is intentionally stricter and more complete than the shorter helper prompt: it includes the Spark 2/Bazzite/HSS Strat assumptions, JSON-only output rules, expansion policy, required slot order, 0–10 knob scale, fallback safe example, and final response checklist.
+
 ## Generated reference and project prompt
 
 Generate project helper files from the current app catalog with:

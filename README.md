@@ -22,6 +22,8 @@ Windows, macOS and Linux. 64-bit OS and Bluetooth (BLE) connectivity required.
 
 The Amp tab now includes an AI tone JSON import/export workflow for Spark 2 development. ChatGPT should generate declarative config files only; it must not generate raw Bluetooth bytes, Spark command frames, base64 protocol payloads, or SysEx chunks.
 
+Use [AI-Instruction-Prompt.md](AI-Instruction-Prompt.md) as the root ChatGPT Project instruction prompt. It contains the strict JSON-only rules, Spark 2/Bazzite/HSS Strat assumptions, expansion policy, slot order, knob scale, and safety boundary.
+
 Safe workflow:
 
 1. Describe a tone to ChatGPT.
